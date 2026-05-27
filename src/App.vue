@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { reactive } from 'vue'
-import { parse } from 'papaparse'
+import { parse, type ParseResult } from 'papaparse'
 
 type Row = Record<string, string>
 
@@ -8,7 +8,7 @@ interface Test {
   label: string
   useWorker: boolean
   status: 'idle' | 'loading' | 'done' | 'error'
-  data: Row[]
+  data: ParseResult<Row> | null
   duration?: number
   error?: string
 }
@@ -16,18 +16,18 @@ interface Test {
 const CSV_URL = `${location.origin}/test.csv`
 
 const tests = reactive<Test[]>([
-  { label: 'worker: true',  useWorker: true,  status: 'idle', data: [] },
-  { label: 'worker: false', useWorker: false, status: 'idle', data: [] },
+  { label: 'worker: true',  useWorker: true,  status: 'idle', data: null },
+  { label: 'worker: false', useWorker: false, status: 'idle', data: null },
 ])
 
-function parseCsv(useWorker: boolean): Promise<Row[]> {
+function parseCsv(useWorker: boolean): Promise<ParseResult<Row>> {
   return new Promise((resolve, reject) => {
     parse<Row>(CSV_URL, {
       worker: useWorker,
       download: true,
       header: true,
       skipEmptyLines: true,
-      complete: (r) => resolve(r.data),
+      complete: resolve,
       error: reject,
     })
   })
@@ -35,7 +35,7 @@ function parseCsv(useWorker: boolean): Promise<Row[]> {
 
 async function runTest(test: Test) {
   test.status = 'loading'
-  test.data = []
+  test.data = null
   const start = performance.now()
   try {
     test.data = await parseCsv(test.useWorker)
@@ -47,8 +47,8 @@ async function runTest(test: Test) {
   }
 }
 
-function hasUndefined(rows: Row[]) {
-  return rows.some(row => Object.values(row).some(v => v === undefined || v === null || String(v) === 'undefined'))
+function hasUndefined(rows: Row[] | undefined) {
+  return rows?.some(row => row == null || Object.values(row).some(v => v === undefined || v === null || String(v) === 'undefined'))
 }
 </script>
 
@@ -65,31 +65,14 @@ function hasUndefined(rows: Row[]) {
     <div v-for="t in tests" :key="t.label">
       <h2>
         {{ t.label }}
-        <span v-if="t.status === 'done'">{{ hasUndefined(t.data) ? '✗ BUG: undefined values' : '✓ OK' }}</span>
+        <span v-if="t.status === 'done'">{{ hasUndefined(t.data?.data) ? '✗ BUG: undefined values' : '✓ OK' }}</span>
         <span v-if="t.status === 'loading'">running…</span>
       </h2>
-      <p v-if="t.status === 'done'">{{ t.data.length }} rows · {{ t.duration }}ms</p>
+      <p v-if="t.status === 'done'">{{ t.data?.data.length }} rows · {{ t.duration }}ms</p>
       <p v-if="t.status === 'error'">Error: {{ t.error }}</p>
-      <table v-if="t.data.length">
-        <thead>
-          <tr><th v-for="h in Object.keys(t.data[0])" :key="h">{{ h }}</th></tr>
-        </thead>
-        <tbody>
-          <tr v-for="(row, i) in t.data" :key="i">
-            <td v-for="h in Object.keys(t.data[0])" :key="h">{{ row[h] ?? 'undefined' }}</td>
-          </tr>
-        </tbody>
-      </table>
+      <pre v-if="t.status === 'done'">{{ JSON.stringify(t.data, null, 2) }}</pre>
       <p v-else-if="t.status === 'idle'">No test run yet.</p>
     </div>
-
-    <details>
-      <summary>Raw JSON</summary>
-      <div v-for="t in tests" :key="t.label">
-        <strong>{{ t.label }}</strong>
-        <pre>{{ JSON.stringify(t.data, null, 2) }}</pre>
-      </div>
-    </details>
   </div>
 </template>
 
